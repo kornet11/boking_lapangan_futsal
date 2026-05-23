@@ -1,3 +1,109 @@
+<?php
+// Koneksi database
+$host = 'localhost';
+$user = 'root';
+$pass = '';
+$dbname = 'futsal_booking';
+
+$conn = mysqli_connect($host, $user, $pass, $dbname);
+
+if (!$conn) {
+    die("Koneksi database gagal: " . mysqli_connect_error());
+}
+
+// Buat tabel jika belum ada
+$sql_lapangan = "CREATE TABLE IF NOT EXISTS lapangan (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    nama_lapangan VARCHAR(100) NOT NULL,
+    jenis_lantai VARCHAR(50) NOT NULL,
+    kapasitas INT NOT NULL,
+    fasilitas TEXT,
+    foto VARCHAR(255),
+    status ENUM('tersedia', 'tidak tersedia', 'maintenance') DEFAULT 'tersedia',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)";
+
+$sql_booking = "CREATE TABLE IF NOT EXISTS booking (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    pelanggan_nama VARCHAR(100) NOT NULL,
+    pelanggan_telp VARCHAR(15),
+    lapangan_id INT,
+    diproses_oleh VARCHAR(100),
+    kode_boking VARCHAR(20) UNIQUE,
+    tanggal_main DATE NOT NULL,
+    jam_mulai TIME NOT NULL,
+    jam_selesai TIME NOT NULL,
+    total_harga INT,
+    status ENUM('pending', 'confirmed', 'completed', 'cancelled') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (lapangan_id) REFERENCES lapangan(id) ON DELETE SET NULL
+)";
+
+mysqli_query($conn, $sql_lapangan);
+mysqli_query($conn, $sql_booking);
+
+// Ambil data dari database
+$lapanganData = [];
+$queryLapangan = "SELECT * FROM lapangan";
+$resultLapangan = mysqli_query($conn, $queryLapangan);
+while ($row = mysqli_fetch_assoc($resultLapangan)) {
+    $lapanganData[] = $row;
+}
+
+$bookings = [];
+$queryBooking = "SELECT b.*, l.nama_lapangan FROM booking b LEFT JOIN lapangan l ON b.lapangan_id = l.id ORDER BY b.created_at DESC";
+$resultBooking = mysqli_query($conn, $queryBooking);
+while ($row = mysqli_fetch_assoc($resultBooking)) {
+    $bookings[] = $row;
+}
+
+// Proses simpan booking
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    if ($_POST['action'] === 'save_booking') {
+        $pelanggan_nama = mysqli_real_escape_string($conn, $_POST['pelanggan_nama']);
+        $pelanggan_telp = mysqli_real_escape_string($conn, $_POST['pelanggan_telp']);
+        $lapangan_id = (int)$_POST['lapangan_id'];
+        $diproses_oleh = mysqli_real_escape_string($conn, $_POST['diproses_oleh']);
+        $tanggal_main = mysqli_real_escape_string($conn, $_POST['tanggal_main']);
+        $jam_mulai = mysqli_real_escape_string($conn, $_POST['jam_mulai']);
+        $jam_selesai = mysqli_real_escape_string($conn, $_POST['jam_selesai']);
+        $total_harga = (int)$_POST['total_harga'];
+        $status = mysqli_real_escape_string($conn, $_POST['status']);
+        
+        // Generate kode booking
+        $countQuery = "SELECT COUNT(*) as total FROM booking";
+        $countResult = mysqli_query($conn, $countQuery);
+        $countRow = mysqli_fetch_assoc($countResult);
+        $nextNumber = $countRow['total'] + 1;
+        $kode_boking = 'BK' . str_pad($nextNumber, 3, '0', STR_PAD_LEFT);
+        
+        $insertQuery = "INSERT INTO booking (pelanggan_nama, pelanggan_telp, lapangan_id, diproses_oleh, kode_boking, tanggal_main, jam_mulai, jam_selesai, total_harga, status) 
+                        VALUES ('$pelanggan_nama', '$pelanggan_telp', $lapangan_id, '$diproses_oleh', '$kode_boking', '$tanggal_main', '$jam_mulai', '$jam_selesai', $total_harga, '$status')";
+        
+        if (mysqli_query($conn, $insertQuery)) {
+            echo "<script>alert('Booking berhasil disimpan! Kode: $kode_boking'); window.location.href='booking.php';</script>";
+        } else {
+            echo "<script>alert('Gagal menyimpan booking: " . mysqli_error($conn) . "');</script>";
+        }
+    }
+    
+    if ($_POST['action'] === 'delete_booking') {
+        $id = (int)$_POST['id'];
+        $deleteQuery = "DELETE FROM booking WHERE id = $id";
+        mysqli_query($conn, $deleteQuery);
+        echo "<script>window.location.href='booking.php';</script>";
+    }
+    
+    if ($_POST['action'] === 'update_status') {
+        $id = (int)$_POST['id'];
+        $status = mysqli_real_escape_string($conn, $_POST['status']);
+        $updateQuery = "UPDATE booking SET status = '$status' WHERE id = $id";
+        mysqli_query($conn, $updateQuery);
+        echo "<script>window.location.href='booking.php';</script>";
+    }
+}
+?>
+
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -86,7 +192,7 @@
             <span class="ms-3 fw-bold" id="pageTitle">Dashboard</span>
         </div>
         <div>
-            <button class="btn-nav" onclick="window.location.href='lapangan.html'">
+            <button class="btn-nav" onclick="window.location.href='lapangan.php'">
                 <i class="fas fa-futbol"></i> Kelola Lapangan
             </button>
         </div>
@@ -171,18 +277,19 @@
                 <strong><i class="fas fa-tag"></i> Harga Sewa:</strong><br>
                 🌞 Pagi-Sore (06:00-18:00) = Rp 30.000/jam &nbsp;&nbsp;🌙 Malam (18:00-24:00) = Rp 50.000/jam
             </div>
-            <form id="bookingForm">
+            <form method="POST" action="" id="bookingForm">
+                <input type="hidden" name="action" value="save_booking">
                 <div class="row">
                     <div class="col-md-6">
                         <div class="mb-3">
                             <label>Nama Pelanggan *</label>
-                            <input type="text" class="form-control" id="pelanggan_nama" required>
+                            <input type="text" class="form-control" name="pelanggan_nama" id="pelanggan_nama" required>
                         </div>
                     </div>
                     <div class="col-md-6">
                         <div class="mb-3">
                             <label>No Telepon</label>
-                            <input type="text" class="form-control" id="pelanggan_telp">
+                            <input type="text" class="form-control" name="pelanggan_telp" id="pelanggan_telp">
                         </div>
                     </div>
                 </div>
@@ -190,8 +297,15 @@
                     <div class="col-md-6">
                         <div class="mb-3">
                             <label>Pilih Lapangan *</label>
-                            <select class="form-control" id="lapangan_id" required onchange="updateLapanganInfo()">
+                            <select class="form-control" name="lapangan_id" id="lapangan_id" required onchange="updateLapanganInfo()">
                                 <option value="">-- Pilih Lapangan --</option>
+                                <?php foreach ($lapanganData as $l): ?>
+                                    <?php if ($l['status'] == 'tersedia'): ?>
+                                        <option value="<?php echo $l['id']; ?>">
+                                            <?php echo $l['nama_lapangan']; ?> - <?php echo $l['jenis_lantai']; ?> (<?php echo $l['kapasitas']; ?> org)
+                                        </option>
+                                    <?php endif; ?>
+                                <?php endforeach; ?>
                             </select>
                             <small class="text-muted" id="infoLapangan"></small>
                         </div>
@@ -199,7 +313,7 @@
                     <div class="col-md-6">
                         <div class="mb-3">
                             <label>Diproses Oleh</label>
-                            <input type="text" class="form-control" id="diproses_oleh" value="Admin" required>
+                            <input type="text" class="form-control" name="diproses_oleh" id="diproses_oleh" value="Admin" required>
                         </div>
                     </div>
                 </div>
@@ -207,19 +321,19 @@
                     <div class="col-md-4">
                         <div class="mb-3">
                             <label>Tanggal Main *</label>
-                            <input type="date" class="form-control" id="tanggal_main" required>
+                            <input type="date" class="form-control" name="tanggal_main" id="tanggal_main" required>
                         </div>
                     </div>
                     <div class="col-md-4">
                         <div class="mb-3">
                             <label>Jam Mulai *</label>
-                            <input type="time" class="form-control" id="jam_mulai" required>
+                            <input type="time" class="form-control" name="jam_mulai" id="jam_mulai" required>
                         </div>
                     </div>
                     <div class="col-md-4">
                         <div class="mb-3">
                             <label>Jam Selesai *</label>
-                            <input type="time" class="form-control" id="jam_selesai" required>
+                            <input type="time" class="form-control" name="jam_selesai" id="jam_selesai" required>
                         </div>
                     </div>
                 </div>
@@ -233,7 +347,7 @@
                     <div class="col-md-6">
                         <div class="mb-3">
                             <label>Total Harga</label>
-                            <input type="text" class="form-control" id="total_harga" readonly style="background:#e9ecef">
+                            <input type="text" class="form-control" name="total_harga" id="total_harga" readonly style="background:#e9ecef">
                         </div>
                     </div>
                 </div>
@@ -241,18 +355,12 @@
                     <div class="col-md-6">
                         <div class="mb-3">
                             <label>Status</label>
-                            <select class="form-control" id="status">
+                            <select class="form-control" name="status" id="status">
                                 <option value="pending">Pending</option>
                                 <option value="confirmed">Confirmed</option>
                                 <option value="completed">Completed</option>
                                 <option value="cancelled">Cancelled</option>
                             </select>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="mb-3">
-                            <label>ID (Auto)</label>
-                            <input type="text" class="form-control" id="booking_id" readonly style="background:#e9ecef">
                         </div>
                     </div>
                 </div>
@@ -344,75 +452,10 @@
 </div>
 
 <script>
-    let lapanganData = JSON.parse(localStorage.getItem('lapangan')) || [];
-    let bookings = JSON.parse(localStorage.getItem('bookings')) || [];
-    let currentId = bookings.length > 0 ? Math.max(...bookings.map(b => b.id)) + 1 : 1;
-    let statusChart = null;
-    let lapanganChart = null;
-    
-    function loadLapanganOptions() {
-        let select = document.getElementById('lapangan_id');
-        if(select) {
-            let options = '<option value="">-- Pilih Lapangan --</option>';
-            for(let l of lapanganData) {
-                if(l.status === 'tersedia') {
-                    options += '<option value="' + l.id + '">' + l.nama_lapangan + ' - ' + l.jenis_lantai + ' (' + l.kapasitas + ' org)</option>';
-                }
-            }
-            select.innerHTML = options;
-        }
-    }
-    
-    function updateLapanganInfo() {
-        let select = document.getElementById('lapangan_id');
-        let selectedId = parseInt(select.value);
-        let lapangan = null;
-        for(let l of lapanganData) {
-            if(l.id === selectedId) {
-                lapangan = l;
-                break;
-            }
-        }
-        let infoSpan = document.getElementById('infoLapangan');
-        if(lapangan && infoSpan) {
-            let fasilitasText = lapangan.fasilitas ? lapangan.fasilitas.join(', ') : '-';
-            infoSpan.innerHTML = '<i class="fas fa-info-circle"></i> ' + lapangan.jenis_lantai + ' | Kapasitas ' + lapangan.kapasitas + ' org | Fasilitas: ' + fasilitasText;
-        } else if(infoSpan) {
-            infoSpan.innerHTML = '';
-        }
-        hitungTotal();
-    }
-    
-    function getHargaPerJam(jam) {
-        let jamAngka = parseInt(jam.split(':')[0]);
-        return (jamAngka >= 6 && jamAngka < 18) ? 30000 : 50000;
-    }
-    
-    function generateKodeBooking() {
-        let nextNumber = bookings.length + 1;
-        let numStr = nextNumber.toString();
-        while(numStr.length < 3) numStr = '0' + numStr;
-        return 'BK' + numStr;
-    }
-    
-    function hitungTotal() {
-        let jamMulai = document.getElementById('jam_mulai').value;
-        let jamSelesai = document.getElementById('jam_selesai').value;
-        if(jamMulai && jamSelesai) {
-            let mulai = parseInt(jamMulai.split(':')[0]);
-            let selesai = parseInt(jamSelesai.split(':')[0]);
-            let durasi = selesai - mulai;
-            if(durasi <= 0) durasi = 1;
-            let total = 0;
-            for(let i = 0; i < durasi; i++) {
-                let jamKe = mulai + i;
-                total += (jamKe >= 6 && jamKe < 18) ? 30000 : 50000;
-            }
-            document.getElementById('total_harga').value = formatRupiah(total);
-            return total;
-        }
-        return 0;
-    }
+    // Data dari PHP
+    let lapanganData = <?php echo json_encode($lapanganData); ?>;
+    let bookingsData = <?php echo json_encode($bookings); ?>;
+    let bookings = bookingsData;
     
     function formatRupiah(angka) {
         let str = angka.toString();
@@ -430,13 +473,55 @@
     
     function getLapanganNamaById(id) {
         for(let l of lapanganData) {
-            if(l.id === id) return l.nama_lapangan;
+            if(l.id == id) return l.nama_lapangan;
         }
         return 'Lapangan tidak ditemukan';
     }
     
+    function getLapanganById(id) {
+        for(let l of lapanganData) {
+            if(l.id == id) return l;
+        }
+        return null;
+    }
+    
+    function updateLapanganInfo() {
+        let select = document.getElementById('lapangan_id');
+        let selectedId = parseInt(select.value);
+        let lapangan = getLapanganById(selectedId);
+        let infoSpan = document.getElementById('infoLapangan');
+        if(lapangan && infoSpan) {
+            let fasilitasText = lapangan.fasilitas ? lapangan.fasilitas : '-';
+            infoSpan.innerHTML = '<i class="fas fa-info-circle"></i> ' + lapangan.jenis_lantai + ' | Kapasitas ' + lapangan.kapasitas + ' org | Fasilitas: ' + fasilitasText;
+        } else if(infoSpan) {
+            infoSpan.innerHTML = '';
+        }
+        hitungTotal();
+    }
+    
+    function hitungTotal() {
+        let jamMulai = document.getElementById('jam_mulai').value;
+        let jamSelesai = document.getElementById('jam_selesai').value;
+        if(jamMulai && jamSelesai) {
+            let mulai = parseInt(jamMulai.split(':')[0]);
+            let selesai = parseInt(jamSelesai.split(':')[0]);
+            let durasi = selesai - mulai;
+            if(durasi <= 0) durasi = 1;
+            let total = 0;
+            for(let i = 0; i < durasi; i++) {
+                let jamKe = mulai + i;
+                total += (jamKe >= 6 && jamKe < 18) ? 30000 : 50000;
+            }
+            document.getElementById('total_harga').value = formatRupiah(total);
+            document.getElementById('total_harga').setAttribute('value', total);
+            return total;
+        }
+        return 0;
+    }
+    
     function updateDashboard() {
         document.getElementById('totalBooking').innerText = bookings.length;
+        
         let uniquePelanggan = [];
         for(let b of bookings) {
             if(!uniquePelanggan.includes(b.pelanggan_nama)) {
@@ -447,7 +532,7 @@
         
         let totalPendapatan = 0;
         for(let b of bookings) {
-            totalPendapatan += b.total_harga;
+            totalPendapatan += parseInt(b.total_harga);
         }
         document.getElementById('totalPendapatan').innerText = formatRupiah(totalPendapatan);
         
@@ -466,10 +551,10 @@
             else if(b.status === 'cancelled') cancelled++;
         }
         
-        if(statusChart) statusChart.destroy();
+        if(window.statusChart) window.statusChart.destroy();
         let ctxStatus = document.getElementById('statusChart');
         if(ctxStatus) {
-            statusChart = new Chart(ctxStatus, {
+            window.statusChart = new Chart(ctxStatus, {
                 type: 'pie',
                 data: {
                     labels: ['Pending', 'Confirmed', 'Completed', 'Cancelled'],
@@ -491,10 +576,10 @@
             }
         }
         
-        if(lapanganChart) lapanganChart.destroy();
+        if(window.lapanganChart) window.lapanganChart.destroy();
         let ctxLapangan = document.getElementById('lapanganChart');
         if(ctxLapangan) {
-            lapanganChart = new Chart(ctxLapangan, {
+            window.lapanganChart = new Chart(ctxLapangan, {
                 type: 'bar',
                 data: {
                     labels: Object.keys(lapanganCount),
@@ -517,7 +602,7 @@
             html += '<td>' + getLapanganNamaById(b.lapangan_id) + '</td>';
             html += '<td>' + b.tanggal_main + '</td>';
             html += '<td>' + b.jam_mulai + '-' + b.jam_selesai + '</td>';
-            html += '<td>' + formatRupiah(b.total_harga) + '</td>';
+            html += '<td>' + formatRupiah(parseInt(b.total_harga)) + '</td>';
             html += '<td><span class="badge-status badge-' + b.status + '">' + b.status + '</span></td>';
             html += '</tr>';
         }
@@ -538,11 +623,24 @@
                 html += '<td>' + getLapanganNamaById(b.lapangan_id) + '</td>';
                 html += '<td>' + b.tanggal_main + '</td>';
                 html += '<td>' + b.jam_mulai + '-' + b.jam_selesai + '</td>';
-                html += '<td>' + formatRupiah(b.total_harga) + '</td>';
+                html += '<td>' + formatRupiah(parseInt(b.total_harga)) + '</td>';
                 html += '<td><span class="badge-status badge-' + b.status + '">' + b.status + '</span></td>';
                 html += '<td>';
-                html += '<button class="btn btn-sm btn-warning" onclick="editBooking(' + b.id + ')"><i class="fas fa-edit"></i></button> ';
-                html += '<button class="btn btn-sm btn-danger" onclick="deleteBooking(' + b.id + ')"><i class="fas fa-trash"></i></button>';
+                html += '<form method="POST" style="display:inline-block">';
+                html += '<input type="hidden" name="action" value="delete_booking">';
+                html += '<input type="hidden" name="id" value="' + b.id + '">';
+                html += '<button type="submit" class="btn btn-sm btn-danger" onclick="return confirm(\'Yakin hapus booking ini?\')"><i class="fas fa-trash"></i> Hapus</button>';
+                html += '</form>';
+                html += '<form method="POST" style="display:inline-block; margin-left:5px;">';
+                html += '<input type="hidden" name="action" value="update_status">';
+                html += '<input type="hidden" name="id" value="' + b.id + '">';
+                html += '<select name="status" class="form-select form-select-sm" style="width:100px; display:inline-block;" onchange="this.form.submit()">';
+                html += '<option value="pending" ' + (b.status === 'pending' ? 'selected' : '') + '>Pending</option>';
+                html += '<option value="confirmed" ' + (b.status === 'confirmed' ? 'selected' : '') + '>Confirmed</option>';
+                html += '<option value="completed" ' + (b.status === 'completed' ? 'selected' : '') + '>Completed</option>';
+                html += '<option value="cancelled" ' + (b.status === 'cancelled' ? 'selected' : '') + '>Cancelled</option>';
+                html += '</select>';
+                html += '</form>';
                 html += '</td>';
                 html += '</tr>';
             }
@@ -550,107 +648,8 @@
         }
     }
     
-    function editBooking(id) {
-        let b = null;
-        for(let item of bookings) {
-            if(item.id === id) {
-                b = item;
-                break;
-            }
-        }
-        if(b) {
-            document.getElementById('booking_id').value = b.id;
-            document.getElementById('pelanggan_nama').value = b.pelanggan_nama;
-            document.getElementById('pelanggan_telp').value = b.pelanggan_telp || '';
-            document.getElementById('lapangan_id').value = b.lapangan_id;
-            document.getElementById('diproses_oleh').value = b.diproses_oleh;
-            document.getElementById('kode_boking').value = b.kode_boking;
-            document.getElementById('tanggal_main').value = b.tanggal_main;
-            document.getElementById('jam_mulai').value = b.jam_mulai;
-            document.getElementById('jam_selesai').value = b.jam_selesai;
-            document.getElementById('status').value = b.status;
-            document.getElementById('total_harga').value = formatRupiah(b.total_harga);
-            updateLapanganInfo();
-            deleteBooking(id, true);
-            showPage('booking');
-        }
-    }
-    
-    function deleteBooking(id, silent) {
-        if(silent === true || confirm('Yakin hapus booking ini?')) {
-            let newBookings = [];
-            for(let b of bookings) {
-                if(b.id !== id) newBookings.push(b);
-            }
-            bookings = newBookings;
-            for(let i = 0; i < bookings.length; i++) {
-                let num = i + 1;
-                let numStr = num.toString();
-                while(numStr.length < 3) numStr = '0' + numStr;
-                bookings[i].kode_boking = 'BK' + numStr;
-            }
-            localStorage.setItem('bookings', JSON.stringify(bookings));
-            updateDashboard();
-            showAllBookings();
-            filterLaporan();
-            if(!silent) alert('Booking dihapus');
-        }
-    }
-    
-    document.getElementById('bookingForm')?.addEventListener('submit', function(e) {
-        e.preventDefault();
-        let total = hitungTotal();
-        let kodeBooking = document.getElementById('kode_boking').value;
-        if(!kodeBooking) kodeBooking = generateKodeBooking();
-        
-        let newBooking = {
-            id: document.getElementById('booking_id').value ? parseInt(document.getElementById('booking_id').value) : currentId++,
-            pelanggan_nama: document.getElementById('pelanggan_nama').value,
-            pelanggan_telp: document.getElementById('pelanggan_telp').value,
-            lapangan_id: parseInt(document.getElementById('lapangan_id').value),
-            diproses_oleh: document.getElementById('diproses_oleh').value,
-            kode_boking: kodeBooking,
-            tanggal_main: document.getElementById('tanggal_main').value,
-            jam_mulai: document.getElementById('jam_mulai').value,
-            jam_selesai: document.getElementById('jam_selesai').value,
-            total_harga: total,
-            status: document.getElementById('status').value,
-            created_at: new Date().toISOString()
-        };
-        
-        let idx = -1;
-        for(let i = 0; i < bookings.length; i++) {
-            if(bookings[i].id === newBooking.id) {
-                idx = i;
-                break;
-            }
-        }
-        if(idx !== -1) {
-            bookings[idx] = newBooking;
-        } else {
-            bookings.push(newBooking);
-        }
-        
-        for(let i = 0; i < bookings.length; i++) {
-            let num = i + 1;
-            let numStr = num.toString();
-            while(numStr.length < 3) numStr = '0' + numStr;
-            bookings[i].kode_boking = 'BK' + numStr;
-        }
-        
-        localStorage.setItem('bookings', JSON.stringify(bookings));
-        resetForm();
-        updateDashboard();
-        showAllBookings();
-        filterLaporan();
-        alert('Booking tersimpan!');
-        showPage('daftar');
-    });
-    
     function resetForm() {
         document.getElementById('bookingForm').reset();
-        document.getElementById('booking_id').value = '';
-        document.getElementById('kode_boking').value = '';
         let today = new Date().toISOString().split('T')[0];
         document.getElementById('tanggal_main').value = today;
         document.getElementById('jam_mulai').value = '15:00';
@@ -662,32 +661,21 @@
     }
     
     function filterLaporan() {
-        let filtered = [];
-        for(let b of bookings) {
-            filtered.push(b);
-        }
+        let filtered = [...bookings];
         let tglMulai = document.getElementById('filter_tgl_mulai').value;
         let tglSelesai = document.getElementById('filter_tgl_selesai').value;
         
         if(tglMulai) {
-            let newFiltered = [];
-            for(let b of filtered) {
-                if(b.tanggal_main >= tglMulai) newFiltered.push(b);
-            }
-            filtered = newFiltered;
+            filtered = filtered.filter(b => b.tanggal_main >= tglMulai);
         }
         if(tglSelesai) {
-            let newFiltered = [];
-            for(let b of filtered) {
-                if(b.tanggal_main <= tglSelesai) newFiltered.push(b);
-            }
-            filtered = newFiltered;
+            filtered = filtered.filter(b => b.tanggal_main <= tglSelesai);
         }
         
         let totalBooking = filtered.length;
         let totalPendapatan = 0;
         for(let b of filtered) {
-            totalPendapatan += b.total_harga;
+            totalPendapatan += parseInt(b.total_harga);
         }
         let rataRata = totalBooking > 0 ? totalPendapatan / totalBooking : 0;
         
@@ -697,7 +685,7 @@
         
         let tbody = document.getElementById('laporanTable');
         if(filtered.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center">Tidak ada data</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center">Tidak ada数据</td></tr>';
         } else {
             let html = '';
             for(let i = 0; i < filtered.length; i++) {
@@ -709,7 +697,7 @@
                 html += '<td>' + getLapanganNamaById(b.lapangan_id) + '</td>';
                 html += '<td>' + b.tanggal_main + '</td>';
                 html += '<td>' + b.jam_mulai + '-' + b.jam_selesai + '</td>';
-                html += '<td>' + formatRupiah(b.total_harga) + '</td>';
+                html += '<td>' + formatRupiah(parseInt(b.total_harga)) + '</td>';
                 html += '<td><span class="badge-status badge-' + b.status + '">' + b.status + '</span></td>';
                 html += '</tr>';
             }
@@ -730,7 +718,6 @@
         } else if(page === 'booking') {
             document.getElementById('bookingPage').style.display = 'block';
             document.getElementById('pageTitle').innerText = 'Form Booking';
-            loadLapanganOptions();
         } else if(page === 'daftar') {
             document.getElementById('daftarPage').style.display = 'block';
             document.getElementById('pageTitle').innerText = 'Daftar Booking';
@@ -758,22 +745,14 @@
     document.getElementById('jam_mulai')?.addEventListener('change', hitungTotal);
     document.getElementById('jam_selesai')?.addEventListener('change', hitungTotal);
     
-    if(bookings.length === 0) {
-        bookings = [
-            {id:1, pelanggan_nama:'Budi Santoso', pelanggan_telp:'08123456789', lapangan_id:1, diproses_oleh:'Admin', kode_boking:'BK001', tanggal_main:'2026-05-25', jam_mulai:'15:00', jam_selesai:'17:00', total_harga:60000, status:'confirmed', created_at:new Date().toISOString()},
-            {id:2, pelanggan_nama:'Andi Wijaya', pelanggan_telp:'08129876543', lapangan_id:2, diproses_oleh:'Admin', kode_boking:'BK002', tanggal_main:'2026-05-26', jam_mulai:'19:00', jam_selesai:'20:00', total_harga:50000, status:'pending', created_at:new Date().toISOString()}
-        ];
-        localStorage.setItem('bookings', JSON.stringify(bookings));
-        currentId = 3;
-    }
-    
     let today = new Date().toISOString().split('T')[0];
     document.getElementById('tanggal_main').value = today;
     document.getElementById('jam_mulai').value = '15:00';
     document.getElementById('jam_selesai').value = '16:00';
-    loadLapanganOptions();
+    
     showPage('dashboard');
 </script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
+<?php mysqli_close($conn); ?>
